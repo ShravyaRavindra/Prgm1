@@ -33,4 +33,4 @@ class RiskModel:
     def predict(self, features):
         if self.model is None:
             raise ValueError("Model is not loaded or trained.")
-        return self.model.predict([features])[0]
+        return self.model.predict(features)

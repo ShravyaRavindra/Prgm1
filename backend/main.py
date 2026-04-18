@@ -1,34 +1,51 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from model import RiskModel
+from database import engine, Base, get_db
+from models import PredictionRecord
 
-app = FastAPI(title="Risk Prediction API")
+app = FastAPI()
+risk_model = RiskModel("risk_model.joblib")
 
-@app.on_event("startup")
-def load_model():
-    app.state.risk_model = RiskModel("risk_model.joblib")
-    print("MODEL LOADED:", app.state.risk_model.model)
 
 class PredictionInput(BaseModel):
     feature1: float
     feature2: float
-    feature3: float
+   
+
+
+@app.on_event("startup")
+def startup():
+    Base.metadata.create_all(bind=engine)
+
 
 @app.get("/")
 def home():
     return {"message": "API is running"}
 
+
 @app.post("/predict")
-def predict(data: PredictionInput, request: Request):
-    risk_model = request.app.state.risk_model
-    features = [data.feature1, data.feature2, data.feature3]
+def predict(data: PredictionInput, db: Session = Depends(get_db)):
+    try:
+        prediction = risk_model.predict([[data.feature1, data.feature2]])[0]
 
-    if risk_model.model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        record = PredictionRecord(
+            feature1=data.feature1,
+            feature2=data.feature2,
+            prediction=int(prediction)
+        )
 
-    result = risk_model.predict(features)
-    return {"prediction": int(result)}
+        db.add(record)
+        db.commit()
+        db.refresh(record)
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+        return {"prediction": int(prediction)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/predictions")
+def get_predictions(db: Session = Depends(get_db)):
+    return db.query(PredictionRecord).all()
